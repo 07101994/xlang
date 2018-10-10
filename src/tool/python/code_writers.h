@@ -782,16 +782,6 @@ static int @_%(%* self, PyObject* value, void* /*unused*/)
         w.write("    virtual winrt::Windows::Foundation::IUnknown const& get_unknown() = 0;\n");
         w.write("    virtual std::size_t hash() = 0;\n\n");
 
-        for (auto&& ii : type.InterfaceImpl())
-        {
-            auto name = type.TypeName();
-            if (ii.Interface().type() == TypeDefOrRef::TypeSpec)
-            {
-                auto gt = ii.Interface().TypeSpec().Signature().GenericTypeInst().GenericType();
-                auto td = gt.type() == TypeDefOrRef::TypeDef ? gt.TypeDef() : find_required(gt.TypeRef());
-                w.write("    virtual PyObject* qi_@() = 0;\n", td.TypeName());
-            }
-        }
 
         for (auto&& method : type.MethodList())
         {
@@ -820,16 +810,6 @@ static int @_%(%* self, PyObject* value, void* /*unused*/)
         w.write("winrt::Windows::Foundation::IUnknown const& get_unknown() override { return obj; }\n");
         w.write("std::size_t hash() override { return py::get_instance_hash(obj); }\n");
 
-        for (auto&& ii : type.InterfaceImpl())
-        {
-            auto name = type.TypeName();
-            if (ii.Interface().type() == TypeDefOrRef::TypeSpec)
-            {
-                auto gt = ii.Interface().TypeSpec().Signature().GenericTypeInst().GenericType();
-                auto td = gt.type() == TypeDefOrRef::TypeDef ? gt.TypeDef() : find_required(gt.TypeRef());
-                w.write("PyObject* qi_@() override { return py::wrap_pinterface<%>(obj); }\n", td.TypeName(), ii.Interface());
-            }
-        }
 
         write_type_methods<write_pinterface_method_decl>(w, type);
 

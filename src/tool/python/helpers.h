@@ -216,9 +216,107 @@ namespace xlang
         return distance(type.GenericParam()) > 0;
     }
 
-    bool is_constructor(MethodDef const& method)
+    struct interface_info
+    {
+        coded_index<TypeDefOrRef> type;
+        std::pair<MethodDef, MethodDef> methods;
+    };
+
+    inline void get_interfaces_impl(writer& w, std::map<std::string, interface_info>& result, std::pair<InterfaceImpl, InterfaceImpl>&& children)
+    {
+        for (auto&& impl : children)
+        {
+            interface_info info{ impl.Interface() };
+            auto name = w.write_temp("%", info.type);
+
+            {
+                // This is for correctness rather than an optimization (but helps performance as well).
+                // If the interface was not previously inserted, carry on and recursively insert it.
+                // If a previous insertion was defaulted we're done as it is correctly captured.
+                // If a newly discovered instance of a previous insertion is not defaulted, we're also done.
+                // If it was previously captured as non-defaulted but now found as defaulted, we carry on and
+                // rediscover it as we need it to be defaulted recursively.
+
+                auto found = result.find(name);
+
+                if (found != result.end())
+                {
+                    continue;
+                }
+            }
+
+            TypeDef definition;
+            writer::generic_param_guard guard;
+
+            switch (info.type.type())
+            {
+            case TypeDefOrRef::TypeDef:
+            {
+                definition = info.type.TypeDef();
+                break;
+            }
+            case TypeDefOrRef::TypeRef:
+            {
+                definition = find_required(info.type.TypeRef());
+                break;
+            }
+            case TypeDefOrRef::TypeSpec:
+            {
+                auto type_signature = info.type.TypeSpec().Signature();
+                guard = w.push_generic_params(type_signature.GenericTypeInst());
+                auto signature = type_signature.GenericTypeInst();
+                definition = find_required(signature.GenericType().TypeRef());
+                break;
+            }
+            }
+
+            info.methods = definition.MethodList();
+            get_interfaces_impl(w, result, definition.InterfaceImpl());
+            result[name] = std::move(info);
+        }
+    };
+
+    inline auto get_interfaces(writer& w, TypeDef const& type)
+    {
+        std::map<std::string, interface_info> result;
+        get_interfaces_impl(w, result, type.InterfaceImpl());
+
+        return result;
+    }
+
+    inline bool is_constructor(MethodDef const& method)
     {
         return method.Flags().RTSpecialName() && method.Name() == ".ctor";
+    }
+
+    inline std::vector<MethodDef> get_methods(writer& w, TypeDef const& type)
+    {
+        std::vector<MethodDef> methods{};
+
+        for (auto&& method : type.MethodList())
+        {
+            if (is_constructor(method))
+            {
+                continue;
+            }
+
+            methods.push_back(method);
+        }
+
+        auto name = type.TypeName();
+
+        if (get_category(type) == category::interface_type)
+        {
+            for (auto&& info : get_interfaces(w, type))
+            {
+                for (auto&& method : info.second.methods)
+                {
+                    methods.push_back(method);
+                }
+            }
+        }
+
+        return std::move(methods);
     }
 
     inline bool is_get_method(MethodDef const& method)
