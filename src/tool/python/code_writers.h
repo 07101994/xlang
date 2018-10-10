@@ -147,7 +147,7 @@ namespace xlang
 
         w.write("\nstatic PyMethodDef @_methods[] = {\n", type.TypeName());
 
-        for (auto&& method : type.MethodList())
+        for (auto&& method : get_methods(w, type))
         {
             if (is_constructor(method))
             {
@@ -469,24 +469,13 @@ static PyType_Spec @_Type_spec =
             for (auto&& m : methods)
             {
                 method_signature signature{ m };
-
-                w.write("    ");
-
-                if (first)
-                {
-                    first = false;
-                }
-                else
-                {
-                    w.write("else ");
-                }
-
-                auto format = R"(if (arg_count == %)
+                auto format = R"(    %if (arg_count == %)
     {
 )";
-                w.write(format, count_in_param(signature.params()));
+                w.write(format, first ? "" : "else ", count_in_param(signature.params()));
                 write_class_method_overload(w, m, signature);
                 w.write("    }\n");
+                first = false;
             }
 
             w.write(R"(    else if (arg_count == -1)
@@ -598,31 +587,22 @@ static PyType_Spec @_Type_spec =
         return nullptr;
     }
 
+    Py_ssize_t arg_count = PyTuple_Size(args);
+
 )");
-            w.write("    Py_ssize_t arg_count = PyTuple_Size(args);\n\n");
 
             bool first{ true };
             for (auto&& m : constructors)
             {
                 method_signature signature{ m };
 
-                w.write("    ");
-
-                if (first)
-                {
-                    first = false;
-                }
-                else
-                {
-                    w.write("else ");
-                }
-
-                auto format = R"(if (arg_count == %)
+                auto format = R"(    %if (arg_count == %)
     {
 )";
-                w.write(format, count_in_param(signature.params()));
+                w.write(format, first ? "" : "else ", count_in_param(signature.params()));
                 write_class_constructor_overload(w, m, signature);
                 w.write("    }\n");
+                first = false;
             }
 
             w.write(R"(    else if (arg_count == -1)
@@ -728,7 +708,7 @@ static PyObject* @_%(%* self, PyObject* args)
 }
 )";
 
-        for (auto&& method : type.MethodList())
+        for (auto&& method : get_methods(w, type))
         {
             if (method_set.find(method.Name()) == method_set.end())
             {
@@ -807,7 +787,7 @@ static int @_%(%* self, PyObject* value, void* /*unused*/)
         w.write("    virtual std::size_t hash() = 0;\n\n");
 
 
-        for (auto&& method : type.MethodList())
+        for (auto&& method : get_methods(w, type))
         {
             w.write("    virtual PyObject* %(PyObject* args) = 0;\n", method.Name());
         }
