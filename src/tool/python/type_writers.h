@@ -94,6 +94,19 @@ namespace xlang
             generic_param_stack.push_back(std::move(names));
             return generic_param_guard{ this };
         }
+
+        [[nodiscard]] auto push_generic_params(coded_index<TypeDefOrRef> index)
+        {
+            switch (index.type())
+            {
+            case TypeDefOrRef::TypeDef:
+                return push_generic_params(index.TypeDef().GenericParam());
+            case TypeDefOrRef::TypeRef:
+                return push_generic_params(find_required(index.TypeRef()).GenericParam());
+            case TypeDefOrRef::TypeSpec:
+                return push_generic_params(index.TypeSpec().Signature().GenericTypeInst());
+            }
+        }
 #pragma endregion
 
         int32_t indent{ 0 };

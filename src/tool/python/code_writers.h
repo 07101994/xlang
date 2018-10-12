@@ -419,66 +419,45 @@ static PyType_Spec @_Type_spec =
 )");
     }
 
-    template <auto F>
-    void write_type_method(writer& w, TypeDef const& type, std::string_view const& method_name)
+    void write_type_special_method_body(writer&w, coded_index<TypeDefOrRef> const& index, MethodDef const& method)
     {
-        std::vector<MethodDef> methods{};
+        //auto guard{ w.push_generic_params(index) };
 
-        for (auto&& method : type.MethodList())
+        if (is_get_method(method))
         {
-            if (method.Name() == method_name)
-            {
-                methods.push_back(method);
-            }
-        }
-
-        XLANG_ASSERT(methods.size() > 0);
-        bool static_method = methods[0].Flags().Static();
-
-        if (methods.size() > 1)
-        {
-            // ensure all the methods found match the static flag of the first method
-            XLANG_ASSERT(std::all_of(methods.begin(), methods.end(),
-                [static_method](MethodDef const& m) { return m.Flags().Static() == static_method; }));
-        }
-
-        F(w, type, methods);
-
-        if (methods.size() == 1 && methods[0].SpecialName())
-        {
-            auto method = methods[0];
-
-            if (is_get_method(method))
-            {
-                w.write(R"(    if (args != nullptr)
-    {
-        PyErr_SetString(PyExc_RuntimeError, "arguments not supported for get methods");
-        return nullptr;
-    }
+            w.write(R"(    if (args != nullptr)
+{
+    PyErr_SetString(PyExc_RuntimeError, "arguments not supported for get methods");
+    return nullptr;
+}
 )");
-            }
+        }
+
+        //method_signature signature{ method };
+        //write_class_method_overload(w, method, signature);
+    }
+
+    void write_type_method_body(writer&w, std::vector<std::pair<coded_index<TypeDefOrRef>, MethodDef>> const& overloads)
+    {
+        w.write("    Py_ssize_t arg_count = PyTuple_Size(args);\n\n");
+
+        bool first{ true };
+        for (auto&& [index, method] : overloads)
+        {
+            //auto guard{ w.push_generic_params(index) };
+            //w.write("// %", index);
 
             method_signature signature{ method };
-            write_class_method_overload(w, method, signature);
+            w.write("    %if (arg_count == %)\n    {\n", 
+                first ? "" : "else ", 
+                count_in_param(signature.params()));
+
+            //write_class_method_overload(w, method, signature);
+            w.write("    }\n");
+            first = false;
         }
-        else
-        {
-            w.write("    Py_ssize_t arg_count = PyTuple_Size(args);\n\n");
 
-            bool first{ true };
-            for (auto&& m : methods)
-            {
-                method_signature signature{ m };
-                auto format = R"(    %if (arg_count == %)
-    {
-)";
-                w.write(format, first ? "" : "else ", count_in_param(signature.params()));
-                write_class_method_overload(w, m, signature);
-                w.write("    }\n");
-                first = false;
-            }
-
-            w.write(R"(    else if (arg_count == -1)
+        w.write(R"(    else if (arg_count == -1)
     {
         return nullptr; 
     }
@@ -486,6 +465,36 @@ static PyType_Spec @_Type_spec =
     PyErr_SetString(PyExc_RuntimeError, "Invalid parameter count");
     return nullptr;
 )");
+
+    }
+
+    template <auto F>
+    void write_type_method(writer& w, TypeDef const& type, std::string_view const& method_name, std::vector<std::pair<coded_index<TypeDefOrRef>, MethodDef>> const& overloads)
+    {
+        F(w, type, method_name, overloads[0].second.Flags().Static());
+
+        if (overloads.size() == 1 && overloads[0].second.SpecialName())
+        {
+            write_type_special_method_body(w, overloads[0].first, overloads[0].second);
+        }
+        else
+        {
+            if (type.TypeName() == "IPropertySet")
+            {
+                auto ts = overloads[0].first.TypeSpec().Signature().GenericTypeInst();
+
+                auto name = find_required(ts.GenericType().TypeRef()).TypeName();
+                
+                for (auto&& arg : ts.GenericArgs())
+                {
+                    auto foo = w.write_temp("%", arg);
+                }
+
+                int i = 9;
+                
+
+            }
+            write_type_method_body(w, overloads);
         }
 
         w.write("}\n");
@@ -494,42 +503,47 @@ static PyType_Spec @_Type_spec =
     template <auto F>
     void write_type_methods(writer& w, TypeDef const& type)
     {
-        std::set<std::string_view> method_set{};
-
-        for (auto&& method : type.MethodList())
+        for (auto&& [method_name, overloads] : get_methods2(w, type))
         {
-            if (is_constructor(method))
-            {
-                continue;
-            }
-
-            if (method_set.find(method.Name()) == method_set.end())
-            {
-                method_set.emplace(method.Name());
-                write_type_method<F>(w, type, method.Name());
-            }
+            write_type_method<F>(w, type, method_name, overloads);
         }
+
+
+        //std::set<std::string_view> method_set{};
+
+        //for (auto&& method : type.MethodList())
+        //{
+        //    if (is_constructor(method))
+        //    {
+        //        continue;
+        //    }
+
+        //    if (method_set.find(method.Name()) == method_set.end())
+        //    {
+        //        method_set.emplace(method.Name());
+        //        
+        //    }
+        //}
     }
     
-    void write_class_method_decl_self_type(writer& w, MethodDef const& method)
+    void write_class_method_decl_self_type(writer& w, TypeDef const& type, bool static_method)
     {
-        if (method.Flags().Static())
+        if (static_method)
         {
             w.write("PyObject* /*unused*/");
         }
         else
         {
-            w.write("%* self", bind<write_winrt_wrapper>(method.Parent()));
+            w.write("%* self", bind<write_winrt_wrapper>(type));
         }
     }
 
-    void write_class_method_decl(writer& w, TypeDef const& type, std::vector<MethodDef> const& methods)
+    void write_class_method_decl(writer& w, TypeDef const& type, std::string_view method_name, bool static_method)
     {
-        auto method = *methods.begin();
         w.write("\nstatic PyObject* @_%(%, PyObject* args)\n{ \n",
             type.TypeName(),
-            method.Name(),
-            bind<write_class_method_decl_self_type>(method));
+            method_name,
+            bind<write_class_method_decl_self_type>(type, static_method));
     }
 
     void write_class_methods(writer& w, TypeDef const& type)
@@ -596,10 +610,9 @@ static PyType_Spec @_Type_spec =
             {
                 method_signature signature{ m };
 
-                auto format = R"(    %if (arg_count == %)
-    {
-)";
-                w.write(format, first ? "" : "else ", count_in_param(signature.params()));
+                w.write("    %if (arg_count == %)\n    {\n", 
+                    first ? "" : "else ", 
+                    count_in_param(signature.params()));
                 write_class_constructor_overload(w, m, signature);
                 w.write("    }\n");
                 first = false;
@@ -673,7 +686,6 @@ static void @_dealloc(%* self)
         auto format = R"(
 PyObject* @_new(PyTypeObject* type, PyObject* args, PyObject* kwds)
 {
-    // TODO implement QI in this pinterface constructor
     PyErr_SetString(PyExc_RuntimeError, "@ is not activatable");
     return nullptr;
 }
@@ -795,10 +807,9 @@ static int @_%(%* self, PyObject* value, void* /*unused*/)
         w.write("};\n");
     }
 
-    void write_pinterface_method_decl(writer& w, TypeDef const&, std::vector<MethodDef> const& methods)
+    void write_pinterface_method_decl(writer& w, TypeDef const&, std::string_view const& method_name, bool)
     {
-        auto method = *methods.begin();
-        w.write("\nPyObject* %(PyObject* args) override\n{\n", method.Name());
+        w.write("\nPyObject* %(PyObject* args) override\n{\n", method_name);
     }
 
     void write_pinterface_impl(writer& w, TypeDef const& type)
@@ -893,6 +904,11 @@ PyObject* @_new(PyTypeObject* type, PyObject* args, PyObject* kwds)
         {
             write_pinterface(w, type);
             return;
+        }
+
+        if (type.TypeName() == "IPropertySet")
+        {
+            int i = 0;
         }
 
         auto guard{ w.push_generic_params(type.GenericParam()) };

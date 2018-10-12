@@ -289,6 +289,49 @@ namespace xlang
         return method.Flags().RTSpecialName() && method.Name() == ".ctor";
     }
 
+    inline auto get_methods2(writer& w, TypeDef const& type)
+    {
+        std::map<std::string_view, std::vector<std::pair<coded_index<TypeDefOrRef>, MethodDef>>> methods{};
+
+        for (auto&& method : type.MethodList())
+        {
+            if (is_constructor(method))
+            {
+                continue;
+            }
+
+            methods[method.Name()].emplace_back(type.coded_index<TypeDefOrRef>(), method);
+        }
+
+        if (get_category(type) == category::interface_type)
+        {
+            for (auto&& info : get_interfaces(w, type))
+            {
+                for (auto&& method : info.second.methods)
+                {
+                    methods[method.Name()].emplace_back(info.second.type, method);
+                }
+            }
+        }
+
+#ifdef XLANG_DEBUG
+        // ensure all the overloads of a given method match the static flag of the first method
+        for (auto&& method : methods)
+        {
+            auto const& overloads = method.second;
+            if (overloads.size() > 1)
+            {
+                auto static_method = overloads[0].second.Flags().Static();
+
+                XLANG_ASSERT(std::all_of(overloads.begin(), overloads.end(),
+                    [static_method](auto const& m) { return m.second.Flags().Static() == static_method; }));
+            }
+        }
+#endif
+
+        return std::move(methods);
+    }
+
     inline std::vector<MethodDef> get_methods(writer& w, TypeDef const& type)
     {
         std::vector<MethodDef> methods{};
